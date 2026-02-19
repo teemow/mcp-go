@@ -988,6 +988,90 @@ func TestStreamableHTTP_SendNotification_Unauthorized_StaticToken(t *testing.T) 
 	}
 }
 
+// TestStreamableHTTP_Unauthorized_PreservesResponseBody verifies that when a server
+// returns 401 with a JSON body (e.g. RFC 6750 error response), the body is included
+// in the error message so callers can distinguish error reasons like "invalid_token"
+// vs "insufficient_scope". The error must still satisfy errors.Is(err, ErrUnauthorized).
+func TestStreamableHTTP_Unauthorized_PreservesResponseBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"invalid_token","error_description":"Token validation failed"}`))
+	}))
+	defer server.Close()
+
+	transport, err := NewStreamableHTTP(server.URL, WithHTTPHeaders(map[string]string{
+		"Authorization": "Bearer static-token",
+	}))
+	if err != nil {
+		t.Fatalf("Failed to create StreamableHTTP: %v", err)
+	}
+
+	_, err = transport.SendRequest(context.Background(), JSONRPCRequest{
+		JSONRPC: "2.0",
+		ID:      mcp.NewRequestId(1),
+		Method:  "test",
+	})
+
+	if err == nil {
+		t.Fatal("Expected error, got nil")
+	}
+
+	// Must still be identifiable as ErrUnauthorized
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("Expected errors.Is(err, ErrUnauthorized) to be true, got %T: %v", err, err)
+	}
+
+	// Must contain the response body so callers can inspect error details
+	if !strings.Contains(err.Error(), "invalid_token") {
+		t.Errorf("Expected error to contain 'invalid_token' from response body, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "Token validation failed") {
+		t.Errorf("Expected error to contain 'Token validation failed' from response body, got: %v", err)
+	}
+}
+
+// TestStreamableHTTP_SendNotification_Unauthorized_PreservesResponseBody verifies that
+// SendNotification also preserves the 401 response body.
+func TestStreamableHTTP_SendNotification_Unauthorized_PreservesResponseBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"invalid_token","error_description":"Token expired"}`))
+	}))
+	defer server.Close()
+
+	transport, err := NewStreamableHTTP(server.URL, WithHTTPHeaders(map[string]string{
+		"Authorization": "Bearer static-token",
+	}))
+	if err != nil {
+		t.Fatalf("Failed to create StreamableHTTP: %v", err)
+	}
+
+	if err := transport.Start(context.Background()); err != nil {
+		t.Fatalf("Failed to start transport: %v", err)
+	}
+
+	err = transport.SendNotification(context.Background(), mcp.JSONRPCNotification{
+		JSONRPC: "2.0",
+		Notification: mcp.Notification{
+			Method: "test/notification",
+		},
+	})
+
+	if err == nil {
+		t.Fatal("Expected error, got nil")
+	}
+
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("Expected errors.Is(err, ErrUnauthorized) to be true, got %T: %v", err, err)
+	}
+
+	if !strings.Contains(err.Error(), "invalid_token") {
+		t.Errorf("Expected error to contain 'invalid_token' from response body, got: %v", err)
+	}
+}
+
 // TestStreamableHTTP_SendNotification_Accepts204NoContent verifies that SendNotification
 // treats HTTP 204 No Content as a success response per RFC 7231.
 // See: https://github.com/mark3labs/mcp-go/issues/700

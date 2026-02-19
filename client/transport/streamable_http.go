@@ -301,6 +301,10 @@ func (c *StreamableHTTP) SendRequest(
 					Handler: c.oauthHandler,
 				}
 			}
+			body, _ := io.ReadAll(resp.Body)
+			if len(body) > 0 {
+				return nil, fmt.Errorf("%w: %s", ErrUnauthorized, body)
+			}
 			return nil, ErrUnauthorized
 		}
 
@@ -581,6 +585,10 @@ func (c *StreamableHTTP) SendNotification(ctx context.Context, notification mcp.
 			return &OAuthAuthorizationRequiredError{
 				Handler: c.oauthHandler,
 			}
+		}
+		body, _ := io.ReadAll(resp.Body)
+		if len(body) > 0 {
+			return fmt.Errorf("%w: %s", ErrUnauthorized, body)
 		}
 		return ErrUnauthorized
 	default:

@@ -176,6 +176,7 @@ func (c *SSE) Start(ctx context.Context) error {
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		// Handle unauthorized error
 		if resp.StatusCode == http.StatusUnauthorized {
@@ -183,6 +184,9 @@ func (c *SSE) Start(ctx context.Context) error {
 				return &OAuthAuthorizationRequiredError{
 					Handler: c.oauthHandler,
 				}
+			}
+			if len(body) > 0 {
+				return fmt.Errorf("%w: %s", ErrUnauthorized, body)
 			}
 			return ErrUnauthorized
 		}
@@ -461,6 +465,9 @@ func (c *SSE) SendRequest(
 					Handler: c.oauthHandler,
 				}
 			}
+			if len(body) > 0 {
+				return nil, fmt.Errorf("%w: %s", ErrUnauthorized, body)
+			}
 			return nil, ErrUnauthorized
 		}
 
@@ -608,6 +615,10 @@ func (c *SSE) SendNotification(ctx context.Context, notification mcp.JSONRPCNoti
 				return &OAuthAuthorizationRequiredError{
 					Handler: c.oauthHandler,
 				}
+			}
+			body, _ := io.ReadAll(resp.Body)
+			if len(body) > 0 {
+				return fmt.Errorf("%w: %s", ErrUnauthorized, body)
 			}
 			return ErrUnauthorized
 		}
